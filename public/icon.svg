@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="waterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="highlightGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="128" fill="#f0f9ff" />
+  <!-- Water Droplet Silhouette -->
+  <path d="M256 72 C256 72 136 220 136 320 C136 386.274 189.726 440 256 440 C322.274 440 376 386.274 376 320 C376 220 256 72 256 72 Z" fill="url(#waterGrad)" />
+  <!-- Highlight shine -->
+  <path d="M220 180 C200 230 180 280 180 320 C180 340 188 360 200 375 C190 360 185 340 185 320 C185 270 208 215 220 180 Z" fill="url(#highlightGrad)" />
+  <!-- Inner water ripple wave -->
+  <path d="M160 340 Q210 320 256 340 T352 340 C345 385 305 420 256 420 C207 420 167 385 160 340 Z" fill="#0369a1" opacity="0.3" />
+</svg>

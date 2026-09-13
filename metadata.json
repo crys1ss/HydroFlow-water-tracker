@@ -1,0 +1,6 @@
+{
+  "name": "Water Tracker",
+  "description": "A minimalist daily water intake tracker with push notification reminders, visual progress dashboard, and smooth animations.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
