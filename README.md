@@ -2,6 +2,8 @@
 
 > A clean, minimalist daily water intake tracker featuring smooth fluid wave animations, smart push notification reminders, and a visual progress dashboard — crafted for a seamless experience across iOS, Android, and Desktop.
 
+🔗 **Live Application URL**: https://hydro-flow-water-tracker.vercel.app/
+
 ---
 
 ## 🌟 Key Features
