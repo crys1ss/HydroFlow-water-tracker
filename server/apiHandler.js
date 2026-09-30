@@ -73,10 +73,15 @@ function createEmailTransporter() {
   return null;
 }
 
+/**
+ * Multi-Provider Automated Email Dispatcher:
+ * Supports:
+ * 1. Resend REST API (RESEND_API_KEY) - Recommended for Vercel / Cloud Run / Production
+ * 2. SendGrid REST API (SENDGRID_API_KEY)
+ * 3. Brevo REST API (BREVO_API_KEY)
+ * 4. SMTP / Gmail App Password (SMTP_USER & SMTP_PASS)
+ */
 async function sendOtpEmail(toEmail, otp) {
-  const transporter = createEmailTransporter();
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER || '"HydroFlow" <no-reply@hydroflow.app>';
-
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -121,26 +126,122 @@ async function sendOtpEmail(toEmail, otp) {
     </body>
     </html>
   `;
+  const plainText = `Your HydroFlow verification code is: ${otp}. It will expire in 10 minutes.`;
+  const subject = `Your HydroFlow Verification Code: ${otp} 💧`;
 
+  // 1. RESEND API DISPATCH (Production Standard)
+  const resendKey = process.env.RESEND_API_KEY?.trim();
+  if (resendKey && !resendKey.includes('re_123456789')) {
+    try {
+      const resendFrom = process.env.RESEND_FROM || process.env.SMTP_FROM || 'HydroFlow <onboarding@resend.dev>';
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${resendKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: resendFrom,
+          to: [toEmail],
+          subject,
+          html: htmlContent,
+          text: plainText,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        console.log(`[HYDROFLOW RESEND API] Dispatched verification email to ${toEmail}. Resend ID: ${data.id}`);
+        return { sent: true, provider: 'resend', id: data.id };
+      } else {
+        console.warn('[HYDROFLOW RESEND API WARNING] Resend returned error:', data);
+      }
+    } catch (err) {
+      console.error('[HYDROFLOW RESEND API ERROR]', err.message);
+    }
+  }
+
+  // 2. SENDGRID REST API DISPATCH
+  const sendgridKey = process.env.SENDGRID_API_KEY?.trim();
+  if (sendgridKey && !sendgridKey.includes('SG.')) {
+    try {
+      const fromEmail = process.env.SENDGRID_FROM || 'no-reply@hydroflow.app';
+      const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sendgridKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: toEmail }] }],
+          from: { email: fromEmail, name: 'HydroFlow' },
+          subject,
+          content: [
+            { type: 'text/plain', value: plainText },
+            { type: 'text/html', value: htmlContent },
+          ],
+        }),
+      });
+      if (res.status === 200 || res.status === 202) {
+        console.log(`[HYDROFLOW SENDGRID API] Dispatched email to ${toEmail}`);
+        return { sent: true, provider: 'sendgrid' };
+      }
+    } catch (err) {
+      console.error('[HYDROFLOW SENDGRID API ERROR]', err.message);
+    }
+  }
+
+  // 3. BREVO REST API DISPATCH
+  const brevoKey = process.env.BREVO_API_KEY?.trim();
+  if (brevoKey) {
+    try {
+      const fromEmail = process.env.BREVO_FROM || 'no-reply@hydroflow.app';
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': brevoKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: 'HydroFlow', email: fromEmail },
+          to: [{ email: toEmail }],
+          subject,
+          htmlContent,
+          textContent: plainText,
+        }),
+      });
+      if (res.ok) {
+        console.log(`[HYDROFLOW BREVO API] Dispatched email to ${toEmail}`);
+        return { sent: true, provider: 'brevo' };
+      }
+    } catch (err) {
+      console.error('[HYDROFLOW BREVO API ERROR]', err.message);
+    }
+  }
+
+  // 4. SMTP (GMAIL APP PASSWORD / NODEMAILER)
+  const transporter = createEmailTransporter();
   if (transporter) {
+    const from = process.env.SMTP_FROM || process.env.SMTP_USER || '"HydroFlow" <no-reply@hydroflow.app>';
     try {
       const info = await transporter.sendMail({
         from,
         to: toEmail,
-        subject: `Your HydroFlow Verification Code: ${otp} 💧`,
-        text: `Your HydroFlow verification code is: ${otp}. It will expire in 10 minutes.`,
+        subject,
+        text: plainText,
         html: htmlContent,
       });
-      console.log(`[HYDROFLOW EMAIL DISPATCH] Sent real email to ${toEmail}. Message ID: ${info.messageId}`);
-      return { sent: true };
+      console.log(`[HYDROFLOW SMTP DISPATCH] Sent real email to ${toEmail}. Message ID: ${info.messageId}`);
+      return { sent: true, provider: 'smtp', messageId: info.messageId };
     } catch (err) {
-      console.error(`[HYDROFLOW EMAIL ERROR] Failed to send email to ${toEmail}:`, err.message);
+      console.error(`[HYDROFLOW SMTP ERROR] Failed to send email to ${toEmail}:`, err.message);
       return { sent: false, error: err.message };
     }
-  } else {
-    console.log(`[HYDROFLOW EMAIL - NOTICE] SMTP not configured in .env. Code generated for ${toEmail}: ${otp}`);
-    return { sent: false, devCode: otp };
   }
+
+  // 5. LOCAL DEV FALLBACK (Logged directly in terminal)
+  console.log(`[HYDROFLOW EMAIL - DEV NOTICE] No email API key (Resend/SendGrid/Brevo) or SMTP configured. 6-digit code for ${toEmail}: ${otp}`);
+  return { sent: false, devCode: otp };
 }
 
 export function handleApiRequest(req, res) {
@@ -166,6 +267,29 @@ export function handleApiRequest(req, res) {
   const processRequest = async (json) => {
     res.setHeader('Content-Type', 'application/json');
     const db = readDb();
+
+    // -1. EMAIL PROVIDER STATUS CHECK
+    if (pathname === '/api/auth/email-status' && req.method === 'GET') {
+      const hasResend = !!(process.env.RESEND_API_KEY && !process.env.RESEND_API_KEY.includes('re_123456789'));
+      const hasSendgrid = !!(process.env.SENDGRID_API_KEY && !process.env.SENDGRID_API_KEY.includes('SG.'));
+      const hasBrevo = !!process.env.BREVO_API_KEY;
+      const hasSmtp = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+
+      const activeProvider = hasResend ? 'resend' : hasSendgrid ? 'sendgrid' : hasBrevo ? 'brevo' : hasSmtp ? 'smtp' : 'dev-local';
+
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        activeProvider,
+        isConfigured: activeProvider !== 'dev-local',
+        providers: {
+          resend: hasResend,
+          sendgrid: hasSendgrid,
+          brevo: hasBrevo,
+          smtp: hasSmtp,
+        },
+      }));
+      return;
+    }
 
     // 0. SEND OTP FOR SIGN UP VERIFICATION
     if (pathname === '/api/auth/send-otp' && req.method === 'POST') {
