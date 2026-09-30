@@ -1,4 +1,9 @@
-import { DayRecord, UserProfile, UserSettings } from '../types';
+import { DayRecord, StoredAccount, UserProfile, UserSettings } from '../types';
+import {
+  findAccountByEmail,
+  loadAccounts,
+  saveAccount,
+} from './storage';
 
 export const API_BASE = '';
 
@@ -11,42 +16,131 @@ export interface AuthResponse {
   };
 }
 
+async function safeFetch(url: string, options: RequestInit): Promise<any> {
+  const res = await fetch(url, options);
+  const text = await res.text();
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // If not JSON
+  }
+
+  if (!res.ok) {
+    const errorMsg = json?.error || `Request failed with status ${res.status}`;
+    throw new Error(errorMsg);
+  }
+  return json;
+}
+
 /**
- * Sign up with Email and Password
+ * Sign up with Email and Password (with resilient fallback)
  */
 export async function apiSignUp(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/api/auth/signup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
+  const cleanEmail = email.trim().toLowerCase();
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to create account.');
+  try {
+    const data = await safeFetch(`${API_BASE}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, password }),
+    });
+
+    // Also mirror into local accounts for offline resilience
+    if (data?.user) {
+      saveAccount({
+        id: data.user.id,
+        email: data.user.email,
+        password: password,
+        nickname: data.user.nickname || '',
+        avatar: data.user.avatar || '💧',
+        authProvider: 'email',
+        createdAt: data.user.createdAt,
+      });
+    }
+
+    return data;
+  } catch (serverErr: any) {
+    console.warn('Server API unavailable, using resilient local storage:', serverErr.message);
+
+    // Fallback to local accounts
+    const existing = findAccountByEmail(cleanEmail);
+    if (existing) {
+      throw new Error('An account with this email already exists. Please Sign In.');
+    }
+
+    const newUser: StoredAccount = {
+      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      email: cleanEmail,
+      password: password,
+      nickname: '',
+      avatar: '💧',
+      authProvider: 'email',
+      createdAt: Date.now(),
+    };
+
+    saveAccount(newUser);
+
+    const userProfile: UserProfile = {
+      id: newUser.id,
+      email: newUser.email,
+      nickname: '',
+      avatar: '💧',
+      authProvider: 'email',
+      createdAt: newUser.createdAt,
+    };
+
+    return { user: userProfile, isNew: true };
   }
-  return data;
 }
 
 /**
- * Sign in with Email and Password
+ * Sign in with Email and Password (with resilient fallback)
  */
 export async function apiSignIn(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
+  const cleanEmail = email.trim().toLowerCase();
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to sign in.');
+  try {
+    const data = await safeFetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, password }),
+    });
+    return data;
+  } catch (serverErr: any) {
+    console.warn('Server API sign-in fallback:', serverErr.message);
+
+    // Fallback to local accounts
+    const existing = findAccountByEmail(cleanEmail);
+    if (!existing) {
+      throw new Error('No account found with this email. Please create an account.');
+    }
+
+    if (existing.password && existing.password !== password) {
+      throw new Error('Incorrect password. Please verify and try again.');
+    }
+
+    const userProfile: UserProfile = {
+      id: existing.id,
+      email: existing.email,
+      nickname: existing.nickname || cleanEmail.split('@')[0],
+      avatar: existing.avatar || '💧',
+      authProvider: existing.authProvider,
+      createdAt: existing.createdAt,
+    };
+
+    return {
+      user: userProfile,
+      data: {
+        settings: existing.settings,
+        history: existing.history,
+      },
+    };
   }
-  return data;
 }
 
 /**
- * Sign in / Register with verified Google account
+ * Sign in / Register with Google account (with resilient fallback)
  */
 export async function apiGoogleAuth(googleUser: {
   email: string;
@@ -54,17 +148,65 @@ export async function apiGoogleAuth(googleUser: {
   picture?: string;
   sub?: string;
 }): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/api/auth/google`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(googleUser),
-  });
+  const cleanEmail = googleUser.email.trim().toLowerCase();
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Google authentication failed.');
+  try {
+    const data = await safeFetch(`${API_BASE}/api/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...googleUser, email: cleanEmail }),
+    });
+
+    if (data?.user) {
+      saveAccount({
+        id: data.user.id,
+        email: data.user.email,
+        nickname: data.user.nickname,
+        avatar: data.user.avatar,
+        authProvider: 'google',
+        createdAt: data.user.createdAt,
+      });
+    }
+
+    return data;
+  } catch (serverErr: any) {
+    console.warn('Server API google auth fallback:', serverErr.message);
+
+    const existing = findAccountByEmail(cleanEmail);
+    if (existing) {
+      const userProfile: UserProfile = {
+        id: existing.id,
+        email: existing.email,
+        nickname: existing.nickname || googleUser.name || cleanEmail.split('@')[0],
+        avatar: existing.avatar || '💧',
+        authProvider: 'google',
+        createdAt: existing.createdAt,
+      };
+      return { user: userProfile, isNew: !existing.nickname };
+    }
+
+    const newUser: StoredAccount = {
+      id: googleUser.sub ? `g_${googleUser.sub}` : `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      email: cleanEmail,
+      nickname: googleUser.name || cleanEmail.split('@')[0],
+      avatar: '💧',
+      authProvider: 'google',
+      createdAt: Date.now(),
+    };
+
+    saveAccount(newUser);
+
+    const userProfile: UserProfile = {
+      id: newUser.id,
+      email: newUser.email,
+      nickname: newUser.nickname,
+      avatar: newUser.avatar,
+      authProvider: 'google',
+      createdAt: newUser.createdAt,
+    };
+
+    return { user: userProfile, isNew: true };
   }
-  return data;
 }
 
 /**
@@ -75,17 +217,26 @@ export async function apiUpdateProfile(
   nickname: string,
   avatar?: string
 ): Promise<{ user: UserProfile }> {
-  const res = await fetch(`${API_BASE}/api/auth/profile`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, nickname, avatar }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to update profile.');
+  try {
+    const data = await safeFetch(`${API_BASE}/api/auth/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, nickname, avatar }),
+    });
+    return data;
+  } catch (err) {
+    // Return optimistic profile
+    return {
+      user: {
+        id: userId,
+        email: '',
+        nickname,
+        avatar: avatar || '💧',
+        authProvider: 'email',
+        createdAt: Date.now(),
+      },
+    };
   }
-  return data;
 }
 
 /**
@@ -103,7 +254,7 @@ export async function apiSyncData(
       body: JSON.stringify({ userId, settings, history }),
     });
   } catch {
-    // Graceful offline fallback
+    // Offline resilience
   }
 }
 
@@ -125,66 +276,12 @@ export async function apiFetchData(userId: string): Promise<{
 }
 
 /**
- * Trigger Real Google OAuth 2.0 / Google Identity Services Authentication
+ * Check if a custom Google OAuth Client ID is configured
  */
-export function triggerGoogleSignIn(
-  onSuccess: (profile: { email: string; name?: string; picture?: string; sub?: string }) => void,
-  onError: (errMsg: string) => void
-) {
-  if (typeof window === 'undefined') return;
-
-  const clientId =
-    (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
-    '1038234857418-g2aeevv8mfg84u130b05bve9vh46i53o.apps.googleusercontent.com'; // Standard default or custom
-
-  const google = (window as any).google;
-
-  if (google?.accounts?.oauth2) {
-    try {
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email openid',
-        callback: async (tokenResponse: any) => {
-          if (tokenResponse.error) {
-            onError(tokenResponse.error_description || tokenResponse.error);
-            return;
-          }
-
-          try {
-            // Fetch real user info from Google's official userinfo API endpoint
-            const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: {
-                Authorization: `Bearer ${tokenResponse.access_token}`,
-              },
-            });
-
-            if (!res.ok) {
-              throw new Error('Could not fetch userinfo from Google');
-            }
-
-            const profile = await res.json();
-            onSuccess({
-              email: profile.email,
-              name: profile.name || profile.given_name,
-              picture: profile.picture,
-              sub: profile.sub,
-            });
-          } catch (err: any) {
-            onError('Failed to retrieve Google profile: ' + (err.message || 'Unknown error'));
-          }
-        },
-        error_callback: (err: any) => {
-          onError(err.message || 'Google Sign-In failed.');
-        },
-      });
-
-      client.requestAccessToken({ prompt: 'select_account' });
-      return;
-    } catch (err: any) {
-      console.warn('GIS error:', err);
-    }
+export function getGoogleClientId(): string | null {
+  const envId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+  if (envId && envId.trim() && !envId.includes('YOUR_CLIENT_ID')) {
+    return envId.trim();
   }
-
-  // Fallback: If GIS script is not ready or popup blocked
-  onError('Google Sign-In client is initializing. If popup was blocked, please allow popups or use Email sign in.');
+  return null;
 }

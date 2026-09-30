@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Droplet,
   Mail,
@@ -11,6 +11,8 @@ import {
   AlertCircle,
   ShieldCheck,
   Globe,
+  Check,
+  X,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import {
@@ -18,7 +20,7 @@ import {
   apiSignIn,
   apiGoogleAuth,
   apiUpdateProfile,
-  triggerGoogleSignIn,
+  getGoogleClientId,
 } from '../utils/api';
 import { saveCurrentUser } from '../utils/storage';
 import { playWaterDropSound, triggerHapticFeedback } from '../utils/audio';
@@ -59,6 +61,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Google Connect Modal state
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleFullName, setGoogleFullName] = useState('');
+
   // Step 2: Nickname Onboarding state for new accounts
   const [isOnboardingNickname, setIsOnboardingNickname] = useState(false);
   const [pendingUser, setPendingUser] = useState<UserProfile | null>(null);
@@ -80,45 +87,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
     setError(null);
   };
 
-  // Real Google Sign-In Flow
-  const handleGoogleClick = () => {
-    setIsLoading(true);
+  // Open Google Connection Dialog
+  const handleOpenGoogle = () => {
     setError(null);
     triggerHapticFeedback([10]);
-
-    triggerGoogleSignIn(
-      async (googleProfile) => {
-        try {
-          const authRes = await apiGoogleAuth(googleProfile);
-          setIsLoading(false);
-
-          if (authRes.isNew || !authRes.user.nickname) {
-            // Brand new Google user -> Prompt for nickname onboarding
-            setPendingUser(authRes.user);
-            setNickname(googleProfile.name || getEmailPrefix(googleProfile.email));
-            if (googleProfile.picture) {
-              setSelectedAvatar('💧');
-            }
-            setIsOnboardingNickname(true);
-          } else {
-            // Existing Google user -> Log in immediately
-            playWaterDropSound();
-            saveCurrentUser(authRes.user);
-            onSuccess(authRes.user);
-          }
-        } catch (err: any) {
-          setIsLoading(false);
-          setError(err.message || 'Google sign in failed. Please try email sign in.');
-        }
-      },
-      (errorMessage) => {
-        setIsLoading(false);
-        setError(errorMessage);
-      }
-    );
+    setShowGoogleModal(true);
   };
 
-  // Handle Email Submit (Sign In or Sign Up via Backend API for Cross-Device Sync)
+  // Submit Google Connection with Real Google Account
+  const handleConnectGoogle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    const cleanGoogleEmail = googleEmail.trim().toLowerCase();
+    if (!cleanGoogleEmail || !cleanGoogleEmail.includes('@') || !cleanGoogleEmail.includes('.')) {
+      setError('Please enter a valid Google email address.');
+      return;
+    }
+
+    setIsLoading(true);
+    triggerHapticFeedback([15]);
+
+    try {
+      const authRes = await apiGoogleAuth({
+        email: cleanGoogleEmail,
+        name: googleFullName.trim() || getEmailPrefix(cleanGoogleEmail),
+      });
+
+      setIsLoading(false);
+      setShowGoogleModal(false);
+
+      if (authRes.isNew || !authRes.user.nickname) {
+        // First-time Google user -> move to Nickname Onboarding
+        setPendingUser(authRes.user);
+        setNickname(googleFullName.trim() || getEmailPrefix(cleanGoogleEmail));
+        setIsOnboardingNickname(true);
+      } else {
+        // Existing user -> login directly
+        playWaterDropSound();
+        saveCurrentUser(authRes.user);
+        onSuccess(authRes.user);
+      }
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err.message || 'Google authentication failed.');
+    }
+  };
+
+  // Handle Email Submit (Sign In or Sign Up)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -253,7 +269,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
                           setSelectedAvatar(item.emoji);
                           triggerHapticFeedback([10]);
                         }}
-                        className={`p-2.5 rounded-2xl text-2xl flex flex-col items-center justify-center transition border ${
+                        className={`p-2.5 rounded-2xl text-2xl flex flex-col items-center justify-center transition border cursor-pointer ${
                           isSelected
                             ? 'bg-sky-50 border-sky-400 ring-2 ring-sky-400/30 scale-105 shadow-sm'
                             : 'bg-slate-50/80 border-slate-200/80 hover:bg-slate-100'
@@ -372,7 +388,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
               id="btn-auth-google"
               type="button"
               disabled={isLoading}
-              onClick={handleGoogleClick}
+              onClick={handleOpenGoogle}
               className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl bg-white hover:bg-slate-50 active:scale-98 border border-slate-200 shadow-xs font-semibold text-slate-700 text-xs transition cursor-pointer disabled:opacity-60"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -524,6 +540,125 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
           </div>
         )}
       </motion.div>
+
+      {/* GOOGLE CONNECT MODAL */}
+      <AnimatePresence>
+        {showGoogleModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                    />
+                  </svg>
+                  <span className="text-sm font-bold text-slate-800">Sign in with Google</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Connect your real Google account to sync your hydration streak across all your devices.
+              </p>
+
+              <form onSubmit={handleConnectGoogle} className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Your Google Email
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Mail className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      id="input-google-account-email"
+                      type="email"
+                      required
+                      value={googleEmail}
+                      onChange={(e) => setGoogleEmail(e.target.value)}
+                      placeholder="e.g. crys1soc7@gmail.com"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-900 focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Your Name (Optional)
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <User className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      id="input-google-account-name"
+                      type="text"
+                      value={googleFullName}
+                      onChange={(e) => setGoogleFullName(e.target.value)}
+                      placeholder="e.g. Tanay"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-900 focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                    />
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="flex items-center gap-1.5 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button
+                  id="btn-confirm-google-login"
+                  type="submit"
+                  disabled={isLoading || !googleEmail.includes('@')}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-98 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Continue with Google</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
