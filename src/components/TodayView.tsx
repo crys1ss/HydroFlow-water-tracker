@@ -1,8 +1,29 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Droplets, Plus, RotateCcw, Trash2, Clock, Coffee, Sparkles, Leaf, Award, BellRing } from 'lucide-react';
+import {
+  Droplets,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Clock,
+  Coffee,
+  Sparkles,
+  Leaf,
+  Award,
+  BellRing,
+  ChevronLeft,
+  ChevronRight,
+  Calendar
+} from 'lucide-react';
 import { DrinkLog, UnitType, UserSettings } from '../types';
-import { formatVolume, formatShortVolume, OZ_TO_ML_FACTOR } from '../utils/storage';
+import {
+  formatVolume,
+  formatShortVolume,
+  OZ_TO_ML_FACTOR,
+  getTodayDateString,
+  formatDateKey,
+  formatDatePretty
+} from '../utils/storage';
 import { WaterWave } from './WaterWave';
 import { CustomAddModal } from './CustomAddModal';
 
@@ -13,6 +34,8 @@ interface TodayViewProps {
   logs: DrinkLog[];
   settings: UserSettings;
   streak: number;
+  selectedDate: string;
+  onSelectDate: (dateStr: string) => void;
   onAddDrink: (amountMl: number, beverage?: DrinkLog['beverage'], note?: string) => void;
   onRemoveLog: (logId: string) => void;
   onUndoLast: () => void;
@@ -26,12 +49,35 @@ export const TodayView: React.FC<TodayViewProps> = ({
   logs,
   settings,
   streak,
+  selectedDate,
+  onSelectDate,
   onAddDrink,
   onRemoveLog,
   onUndoLast,
   onNavigateToReminders,
 }) => {
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
+
+  const todayStr = getTodayDateString();
+  const isViewingToday = selectedDate === todayStr;
+
+  // Handle day changes
+  const handlePrevDay = () => {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const target = new Date(y, m - 1, d);
+    target.setDate(target.getDate() - 1);
+    onSelectDate(formatDateKey(target));
+  };
+
+  const handleNextDay = () => {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const target = new Date(y, m - 1, d);
+    target.setDate(target.getDate() + 1);
+    const nextKey = formatDateKey(target);
+    if (nextKey <= todayStr) {
+      onSelectDate(nextKey);
+    }
+  };
 
   // Quick preset buttons tailored to unit
   const presets = unit === 'oz'
@@ -51,15 +97,15 @@ export const TodayView: React.FC<TodayViewProps> = ({
   const percentage = goalMl > 0 ? Math.round((currentMl / goalMl) * 100) : 0;
 
   // Hydration status insight
-  let statusText = 'Starting off your hydration journey';
+  let statusText = 'Starting off hydration';
   if (percentage >= 100) {
-    statusText = 'Goal achieved! Superbly hydrated today';
+    statusText = 'Goal achieved! Superbly hydrated';
   } else if (percentage >= 75) {
-    statusText = 'In the home stretch! One or two sips left';
+    statusText = 'In the home stretch! Almost there';
   } else if (percentage >= 50) {
-    statusText = 'Halfway mark conquered! Keep sipping';
+    statusText = 'Halfway conquered! Keep sipping';
   } else if (percentage >= 25) {
-    statusText = 'Good momentum! Maintaining healthy rhythm';
+    statusText = 'Good momentum! Maintaining rhythm';
   }
 
   const getBeverageIcon = (type: DrinkLog['beverage']) => {
@@ -78,12 +124,12 @@ export const TodayView: React.FC<TodayViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 pb-24 animate-in fade-in duration-300">
-      {/* Top Header Card */}
+    <div className="space-y-4 pb-24 animate-in fade-in duration-300">
+      {/* Top Header Card with Day Switcher */}
       <div className="flex items-center justify-between pt-1">
         <div>
           <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-600">
-            Today's Hydration
+            {isViewingToday ? "Today's Hydration" : "Historical Hydration"}
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
             Drink Water
@@ -102,6 +148,47 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </div>
       </div>
 
+      {/* Date Switcher Bar */}
+      <div className="bg-white rounded-2xl p-2 border border-slate-200/70 shadow-xs flex items-center justify-between">
+        <button
+          id="btn-prev-day"
+          onClick={handlePrevDay}
+          className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-600 transition active:scale-95"
+          title="Previous Day"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-sky-600" />
+          <span className="text-xs font-bold text-slate-800">
+            {formatDatePretty(selectedDate)}
+          </span>
+          {!isViewingToday && (
+            <button
+              onClick={() => onSelectDate(todayStr)}
+              className="text-[10px] font-semibold text-sky-600 bg-sky-50 hover:bg-sky-100 px-2 py-0.5 rounded-md transition"
+            >
+              Jump to Today
+            </button>
+          )}
+        </div>
+
+        <button
+          id="btn-next-day"
+          disabled={isViewingToday}
+          onClick={handleNextDay}
+          className={`p-1.5 rounded-xl transition ${
+            isViewingToday
+              ? 'text-slate-200 cursor-not-allowed'
+              : 'text-slate-600 hover:bg-slate-100 active:scale-95'
+          }`}
+          title="Next Day"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
+      </div>
+
       {/* Visual Water Wave Container */}
       <WaterWave currentMl={currentMl} goalMl={goalMl} unit={unit} />
 
@@ -116,13 +203,13 @@ export const TodayView: React.FC<TodayViewProps> = ({
               {statusText}
             </div>
             <div className="text-[11px] text-slate-500">
-              {logs.length} drinks logged today
+              {logs.length} drinks logged for this date
             </div>
           </div>
         </div>
 
         {/* Reminder Shortcut Pill */}
-        {settings.reminders.enabled && (
+        {settings.reminders.enabled && isViewingToday && (
           <button
             id="btn-shortcut-reminders"
             onClick={onNavigateToReminders}
@@ -138,7 +225,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
       <div>
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Quick Add
+            {isViewingToday ? 'Quick Add' : 'Log Water for this Date'}
           </span>
           {logs.length > 0 && (
             <button
@@ -160,7 +247,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
               id={`btn-quick-add-${idx}`}
               whileTap={{ scale: 0.94 }}
               onClick={() => onAddDrink(preset.amountMl, 'water')}
-              className="group flex flex-col items-center justify-center p-3 rounded-2xl bg-white hover:bg-sky-50/60 border border-slate-200/80 hover:border-sky-300 shadow-xs transition duration-150"
+              className="group flex flex-col items-center justify-center p-3 rounded-2xl bg-white hover:bg-sky-50/60 border border-slate-200/80 hover:border-sky-300 shadow-xs transition duration-150 cursor-pointer"
             >
               <span className="text-xl mb-1 group-hover:scale-110 transition-transform">
                 {preset.icon}
@@ -179,19 +266,19 @@ export const TodayView: React.FC<TodayViewProps> = ({
         <button
           id="btn-open-custom-add"
           onClick={() => setIsCustomModalOpen(true)}
-          className="mt-2.5 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-98 text-white font-semibold text-xs shadow-sm shadow-sky-600/20 transition"
+          className="mt-2.5 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-98 text-white font-semibold text-xs shadow-sm shadow-sky-600/20 transition cursor-pointer"
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
           <span>Custom Volume or Beverage</span>
         </button>
       </div>
 
-      {/* Today's Intake History List */}
+      {/* Date's Intake History List */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-xs">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <Clock className="w-4 h-4 text-slate-400" />
-            <span>Today's Timeline</span>
+            <span>Timeline for {formatDatePretty(selectedDate)}</span>
           </h2>
           <span className="text-xs font-semibold text-slate-500">
             {formatVolume(currentMl, unit)}
@@ -203,9 +290,9 @@ export const TodayView: React.FC<TodayViewProps> = ({
             <div className="w-12 h-12 rounded-full bg-sky-50 text-sky-400 flex items-center justify-center mx-auto mb-2">
               <Droplets className="w-6 h-6" />
             </div>
-            <p className="text-xs font-semibold text-slate-700">No drinks logged yet today</p>
+            <p className="text-xs font-semibold text-slate-700">No drinks logged for this date</p>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Tap any quick button above to log your first sip!
+              Tap any quick button above to record your hydration!
             </p>
           </div>
         ) : (
@@ -266,3 +353,4 @@ export const TodayView: React.FC<TodayViewProps> = ({
     </div>
   );
 };
+

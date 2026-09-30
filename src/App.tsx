@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { NavTab, UserSettings, DayRecord, DrinkLog } from './types';
+import React, { useState, useEffect } from 'react';
+import { NavTab, UserSettings, DayRecord, DrinkLog, BeverageType } from './types';
 import {
   loadSettings,
   saveSettings,
@@ -27,14 +27,17 @@ import { Droplet, Smartphone, Monitor } from 'lucide-react';
 export default function App() {
   const [settings, setSettings] = useState<UserSettings>(() => loadSettings());
   const [history, setHistory] = useState<Record<string, DayRecord>>(() => loadHistory());
+  const [selectedDate, setSelectedDate] = useState<string>(() => getTodayDateString());
   const [currentTab, setCurrentTab] = useState<NavTab>('today');
   const [activeNotification, setActiveNotification] = useState<{ title: string; body: string } | null>(null);
   const [showCelebration, setShowCelebration] = useState(false);
   const [viewMode, setViewMode] = useState<'mobile-frame' | 'responsive'>('mobile-frame');
 
   const todayStr = getTodayDateString();
-  const todayRecord = history[todayStr] || {
-    date: todayStr,
+
+  // Active record for the selected date (Today or a historical day)
+  const activeRecord = history[selectedDate] || {
+    date: selectedDate,
     total: 0,
     goal: settings.dailyGoal,
     logs: [],
@@ -52,11 +55,34 @@ export default function App() {
     saveHistory(history);
   }, [history]);
 
+  // Midnight day rollover check & auto date refresh
+  useEffect(() => {
+    const checkDayChange = () => {
+      const currentToday = getTodayDateString();
+      setHistory((prev) => {
+        if (!prev[currentToday]) {
+          return {
+            ...prev,
+            [currentToday]: {
+              date: currentToday,
+              total: 0,
+              goal: settings.dailyGoal,
+              logs: [],
+            },
+          };
+        }
+        return prev;
+      });
+    };
+
+    const interval = setInterval(checkDayChange, 30000);
+    return () => clearInterval(interval);
+  }, [settings.dailyGoal]);
+
   // Subscribe to in-app notification alerts
   useEffect(() => {
     const unsubscribe = subscribeToInAppNotifications((title, body) => {
       setActiveNotification({ title, body });
-      // Auto-hide in-app notification after 8 seconds
       setTimeout(() => {
         setActiveNotification((current) => (current?.title === title ? null : current));
       }, 8000);
@@ -68,13 +94,11 @@ export default function App() {
   useEffect(() => {
     if (!settings.reminders.enabled) return;
 
-    // Check every 30 seconds
     const intervalId = setInterval(() => {
       const now = Date.now();
       const lastNotified = settings.reminders.lastNotifiedTime || 0;
       const intervalMs = settings.reminders.intervalMinutes * 60 * 1000;
 
-      // Check active hours (e.g. 08:00 - 22:00)
       const inHours = isWithinActiveHours(settings.reminders.startTime, settings.reminders.endTime);
 
       if (inHours && now - lastNotified >= intervalMs) {
@@ -92,8 +116,13 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [settings.reminders]);
 
-  // Handle adding a drink
-  const handleAddDrink = (amountMl: number, beverage: DrinkLog['beverage'] = 'water', note?: string) => {
+  // Handle adding a drink (supports targetDate for historical day logging)
+  const handleAddDrink = (
+    amountMl: number,
+    beverage: BeverageType = 'water',
+    note?: string,
+    targetDate?: string
+  ) => {
     if (settings.soundEnabled) {
       playWaterDropSound();
     }
@@ -101,83 +130,110 @@ export default function App() {
       triggerHapticFeedback([20]);
     }
 
-    const newLog: DrinkLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      amount: amountMl,
-      timestamp: Date.now(),
-      beverage,
-      note,
-    };
+    const dateKey = targetDate || selectedDate || todayStr;
 
-    const prevTotal = todayRecord.total;
-    const newTotal = prevTotal + amountMl;
+    setHistory((prev) => {
+      const existing = prev[dateKey] || {
+        date: dateKey,
+        total: 0,
+        goal: settings.dailyGoal,
+        logs: [],
+      };
 
-    // Trigger goal celebration if user just crossed 100% of their daily goal
-    if (prevTotal < settings.dailyGoal && newTotal >= settings.dailyGoal) {
-      setShowCelebration(true);
-    }
+      const prevTotal = existing.total;
+      const newTotal = prevTotal + amountMl;
 
-    setHistory((prev) => ({
-      ...prev,
-      [todayStr]: {
-        ...todayRecord,
-        total: newTotal,
-        logs: [newLog, ...todayRecord.logs],
-      },
-    }));
+      const newLog: DrinkLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        amount: amountMl,
+        timestamp: dateKey === todayStr ? Date.now() : new Date(`${dateKey}T12:00:00`).getTime(),
+        beverage,
+        note,
+      };
+
+      if (dateKey === todayStr && prevTotal < existing.goal && newTotal >= existing.goal) {
+        setShowCelebration(true);
+      }
+
+      return {
+        ...prev,
+        [dateKey]: {
+          ...existing,
+          total: newTotal,
+          logs: [newLog, ...existing.logs],
+        },
+      };
+    });
   };
 
   // Remove a specific log
-  const handleRemoveLog = (logId: string) => {
-    const logToRemove = todayRecord.logs.find((l) => l.id === logId);
-    if (!logToRemove) return;
+  const handleRemoveLog = (logId: string, targetDate?: string) => {
+    const dateKey = targetDate || selectedDate || todayStr;
 
     if (settings.hapticEnabled) {
       triggerHapticFeedback([10]);
     }
 
-    setHistory((prev) => ({
-      ...prev,
-      [todayStr]: {
-        ...todayRecord,
-        total: Math.max(0, todayRecord.total - logToRemove.amount),
-        logs: todayRecord.logs.filter((l) => l.id !== logId),
-      },
-    }));
+    setHistory((prev) => {
+      const existing = prev[dateKey];
+      if (!existing) return prev;
+
+      const logToRemove = existing.logs.find((l) => l.id === logId);
+      if (!logToRemove) return prev;
+
+      return {
+        ...prev,
+        [dateKey]: {
+          ...existing,
+          total: Math.max(0, existing.total - logToRemove.amount),
+          logs: existing.logs.filter((l) => l.id !== logId),
+        },
+      };
+    });
   };
 
   // Undo the most recent log
-  const handleUndoLast = () => {
-    if (todayRecord.logs.length === 0) return;
-    const [mostRecent] = todayRecord.logs;
-    handleRemoveLog(mostRecent.id);
+  const handleUndoLast = (targetDate?: string) => {
+    const dateKey = targetDate || selectedDate || todayStr;
+    const current = history[dateKey];
+    if (!current || current.logs.length === 0) return;
+    const [mostRecent] = current.logs;
+    handleRemoveLog(mostRecent.id, dateKey);
   };
 
-  // Reset today's intake back to 0
-  const handleResetToday = () => {
+  // Reset a date's intake back to 0
+  const handleResetDay = (targetDate?: string) => {
+    const dateKey = targetDate || selectedDate || todayStr;
     if (settings.hapticEnabled) {
       triggerHapticFeedback([15, 30, 15]);
     }
-    setHistory((prev) => ({
-      ...prev,
-      [todayStr]: {
-        ...todayRecord,
+    setHistory((prev) => {
+      const existing = prev[dateKey] || {
+        date: dateKey,
         total: 0,
+        goal: settings.dailyGoal,
         logs: [],
-      },
-    }));
+      };
+      return {
+        ...prev,
+        [dateKey]: {
+          ...existing,
+          total: 0,
+          logs: [],
+        },
+      };
+    });
   };
 
   // Update settings helper
   const handleUpdateSettings = (updated: Partial<UserSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...updated };
-      // If daily goal changed, also update today's target
       if (updated.dailyGoal && updated.dailyGoal !== prev.dailyGoal) {
         setHistory((h) => ({
           ...h,
           [todayStr]: {
-            ...todayRecord,
+            ...(h[todayStr] || { date: todayStr, total: 0, logs: [] }),
             goal: updated.dailyGoal!,
           },
         }));
@@ -203,8 +259,8 @@ export default function App() {
       <header className="w-full max-w-md hidden sm:flex items-center justify-between px-3 py-1.5 mb-2 text-xs text-slate-500">
         <div className="flex items-center gap-1.5 font-medium">
           <Droplet className="w-3.5 h-3.5 text-sky-600 fill-sky-600" />
-          <span className="text-slate-700 font-semibold">Water Tracker</span>
-          <span className="text-slate-400">• iOS & Android Ready</span>
+          <span className="text-slate-700 font-semibold">HydroFlow Water Tracker</span>
+          <span className="text-slate-400">• v2.1 Ready</span>
         </div>
 
         <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
@@ -246,7 +302,7 @@ export default function App() {
             : 'max-w-xl sm:rounded-3xl sm:shadow-lg sm:border sm:border-slate-200'
         }`}
       >
-        {/* Mobile Device Status Bar Notch (in mobile shell mode on desktop) */}
+        {/* Mobile Device Status Bar Notch */}
         {viewMode === 'mobile-frame' && (
           <div className="hidden sm:flex items-center justify-between px-6 pt-3 pb-1 text-[11px] font-semibold text-slate-700 select-none">
             <span>09:41</span>
@@ -279,15 +335,17 @@ export default function App() {
         <div className="p-4 sm:p-5">
           {currentTab === 'today' && (
             <TodayView
-              currentMl={todayRecord.total}
-              goalMl={todayRecord.goal}
+              currentMl={activeRecord.total}
+              goalMl={activeRecord.goal || settings.dailyGoal}
               unit={settings.unit}
-              logs={todayRecord.logs}
+              logs={activeRecord.logs}
               settings={settings}
               streak={streak}
-              onAddDrink={handleAddDrink}
-              onRemoveLog={handleRemoveLog}
-              onUndoLast={handleUndoLast}
+              selectedDate={selectedDate}
+              onSelectDate={setSelectedDate}
+              onAddDrink={(amt, bev, note) => handleAddDrink(amt, bev, note, selectedDate)}
+              onRemoveLog={(id) => handleRemoveLog(id, selectedDate)}
+              onUndoLast={() => handleUndoLast(selectedDate)}
               onNavigateToReminders={() => setCurrentTab('reminders')}
             />
           )}
@@ -298,6 +356,8 @@ export default function App() {
               goalMl={settings.dailyGoal}
               unit={settings.unit}
               streak={streak}
+              onAddDrink={handleAddDrink}
+              onRemoveLog={handleRemoveLog}
             />
           )}
 
@@ -313,7 +373,7 @@ export default function App() {
             <SettingsView
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
-              onResetToday={handleResetToday}
+              onResetToday={() => handleResetDay(todayStr)}
             />
           )}
         </div>
@@ -328,3 +388,4 @@ export default function App() {
     </div>
   );
 }
+
