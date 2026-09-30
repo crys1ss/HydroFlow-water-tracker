@@ -245,6 +245,7 @@ async function sendOtpEmail(toEmail, otp) {
 }
 
 export function handleApiRequest(req, res) {
+  dotenv.config({ override: true });
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const rawPath = url.pathname || '';
   const pathname = rawPath.toLowerCase().replace(/\/+$/, '') || '/';
