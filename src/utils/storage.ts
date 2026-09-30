@@ -1,8 +1,10 @@
-import { DayRecord, DrinkLog, UnitType, UserSettings } from '../types';
+import { DayRecord, DrinkLog, StoredAccount, UnitType, UserProfile, UserSettings } from '../types';
 
 const STORAGE_KEYS = {
   SETTINGS: 'hydroflow_settings_v2',
   HISTORY: 'hydroflow_history_v2',
+  CURRENT_USER: 'hydroflow_current_user_v1',
+  ACCOUNTS: 'hydroflow_accounts_v1',
 };
 
 // Conversions
@@ -141,6 +143,109 @@ export function clearAllStorageData(): void {
   } catch {
     // Ignore
   }
+}
+
+/**
+ * Load active logged in user profile
+ */
+export function loadCurrentUser(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save active logged in user profile
+ */
+export function saveCurrentUser(user: UserProfile | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Load all registered user accounts
+ */
+export function loadAccounts(): StoredAccount[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save or update a stored account
+ */
+export function saveAccount(account: StoredAccount): void {
+  try {
+    const accounts = loadAccounts();
+    const existingIdx = accounts.findIndex((a) => a.id === account.id || a.email.toLowerCase() === account.email.toLowerCase());
+    if (existingIdx >= 0) {
+      accounts[existingIdx] = { ...accounts[existingIdx], ...account };
+    } else {
+      accounts.push(account);
+    }
+    localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Find account by email
+ */
+export function findAccountByEmail(email: string): StoredAccount | undefined {
+  const accounts = loadAccounts();
+  return accounts.find((a) => a.email.toLowerCase() === email.trim().toLowerCase());
+}
+
+/**
+ * Update user nickname and optional avatar
+ */
+export function updateUserNickname(userId: string, nickname: string, avatar?: string): UserProfile | null {
+  try {
+    const currentUser = loadCurrentUser();
+    if (!currentUser) return null;
+
+    const updatedUser: UserProfile = {
+      ...currentUser,
+      nickname: nickname.trim(),
+      ...(avatar ? { avatar } : {}),
+    };
+
+    saveCurrentUser(updatedUser);
+
+    // Also update in accounts list
+    const accounts = loadAccounts();
+    const idx = accounts.findIndex((a) => a.id === userId || a.email.toLowerCase() === updatedUser.email.toLowerCase());
+    if (idx >= 0) {
+      accounts[idx].nickname = nickname.trim();
+      if (avatar) accounts[idx].avatar = avatar;
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+    }
+
+    return updatedUser;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Log out current user
+ */
+export function logoutUser(): void {
+  saveCurrentUser(null);
 }
 
 /**

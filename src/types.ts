@@ -37,4 +37,25 @@ export interface UserSettings {
   reminders: ReminderSettings;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  nickname: string;
+  avatar: string;
+  authProvider: 'google' | 'email';
+  createdAt: number;
+}
+
+export interface StoredAccount {
+  id: string;
+  email: string;
+  password?: string;
+  nickname: string;
+  avatar: string;
+  authProvider: 'google' | 'email';
+  createdAt: number;
+  settings?: UserSettings;
+  history?: Record<string, DayRecord>;
+}
+
 export type NavTab = 'today' | 'progress' | 'reminders' | 'settings';

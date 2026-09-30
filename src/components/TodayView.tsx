@@ -13,9 +13,10 @@ import {
   BellRing,
   ChevronLeft,
   ChevronRight,
-  Calendar
+  Calendar,
+  User
 } from 'lucide-react';
-import { DrinkLog, UnitType, UserSettings } from '../types';
+import { DrinkLog, UnitType, UserProfile, UserSettings } from '../types';
 import {
   formatVolume,
   formatShortVolume,
@@ -33,6 +34,7 @@ interface TodayViewProps {
   unit: UnitType;
   logs: DrinkLog[];
   settings: UserSettings;
+  user?: UserProfile | null;
   streak: number;
   selectedDate: string;
   onSelectDate: (dateStr: string) => void;
@@ -40,6 +42,7 @@ interface TodayViewProps {
   onRemoveLog: (logId: string) => void;
   onUndoLast: () => void;
   onNavigateToReminders: () => void;
+  onNavigateToSettings?: () => void;
 }
 
 export const TodayView: React.FC<TodayViewProps> = ({
@@ -48,6 +51,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   unit,
   logs,
   settings,
+  user,
   streak,
   selectedDate,
   onSelectDate,
@@ -55,6 +59,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   onRemoveLog,
   onUndoLast,
   onNavigateToReminders,
+  onNavigateToSettings,
 }) => {
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
 
@@ -129,22 +134,44 @@ export const TodayView: React.FC<TodayViewProps> = ({
       <div className="flex items-center justify-between pt-1">
         <div>
           <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-600">
-            {isViewingToday ? "Today's Hydration" : "Historical Hydration"}
+            {isViewingToday
+              ? user?.nickname
+                ? `Hello, ${user.nickname} 👋`
+                : "Today's Hydration"
+              : "Historical Hydration"}
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Drink Water
+            {isViewingToday ? 'Stay Hydrated' : 'Drink Water'}
           </h1>
         </div>
 
-        {/* Streak Counter Badge */}
-        <div
-          id="streak-indicator-badge"
-          className="flex items-center gap-1.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 px-3 py-1.5 rounded-full shadow-xs"
-        >
-          <Award className="w-4 h-4 text-amber-600" />
-          <span className="text-xs font-bold text-amber-900">
-            {streak} {streak === 1 ? 'day' : 'days'} streak
-          </span>
+        {/* Right Header Badges: Streak & Profile Pill */}
+        <div className="flex items-center gap-1.5">
+          {/* Streak Counter Badge */}
+          <div
+            id="streak-indicator-badge"
+            className="flex items-center gap-1.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 px-2.5 py-1.5 rounded-full shadow-xs"
+          >
+            <Award className="w-3.5 h-3.5 text-amber-600" />
+            <span className="text-xs font-bold text-amber-900">
+              {streak}d
+            </span>
+          </div>
+
+          {/* User Profile Shortcut Pill */}
+          {user && onNavigateToSettings && (
+            <button
+              id="btn-today-profile-shortcut"
+              onClick={onNavigateToSettings}
+              className="flex items-center gap-1 bg-white hover:bg-sky-50 border border-slate-200/90 hover:border-sky-300 px-2 py-1 rounded-full shadow-2xs transition cursor-pointer group"
+              title="Open Settings & Profile"
+            >
+              <span className="text-sm">{user.avatar || '💧'}</span>
+              <span className="text-[11px] font-bold text-slate-700 max-w-[70px] truncate group-hover:text-sky-700">
+                {user.nickname}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 

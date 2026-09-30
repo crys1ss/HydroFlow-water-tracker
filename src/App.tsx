@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { NavTab, UserSettings, DayRecord, DrinkLog, BeverageType } from './types';
+import { NavTab, UserSettings, DayRecord, DrinkLog, BeverageType, UserProfile } from './types';
 import {
   loadSettings,
   saveSettings,
@@ -8,6 +8,9 @@ import {
   getTodayDateString,
   calculateStreak,
   formatVolume,
+  loadCurrentUser,
+  updateUserNickname,
+  logoutUser,
 } from './utils/storage';
 import { playWaterDropSound, triggerHapticFeedback } from './utils/audio';
 import {
@@ -22,9 +25,12 @@ import { RemindersView } from './components/RemindersView';
 import { SettingsView } from './components/SettingsView';
 import { InAppReminderBanner } from './components/InAppReminderBanner';
 import { GoalCelebration } from './components/GoalCelebration';
+import { AuthModal } from './components/AuthModal';
 import { Droplet, Smartphone, Monitor } from 'lucide-react';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => loadCurrentUser());
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(() => !loadCurrentUser());
   const [settings, setSettings] = useState<UserSettings>(() => loadSettings());
   const [history, setHistory] = useState<Record<string, DayRecord>>(() => loadHistory());
   const [selectedDate, setSelectedDate] = useState<string>(() => getTodayDateString());
@@ -270,6 +276,30 @@ export default function App() {
     }));
   };
 
+  // Auth & Profile Management Handlers
+  const handleAuthSuccess = (userProfile: UserProfile) => {
+    setCurrentUser(userProfile);
+    setIsAuthModalOpen(false);
+  };
+
+  const handleUpdateProfile = (nickname: string, avatar?: string) => {
+    if (!currentUser) return;
+    const updated = updateUserNickname(currentUser.id, nickname, avatar);
+    if (updated) {
+      setCurrentUser(updated);
+    }
+  };
+
+  const handleLogout = () => {
+    logoutUser();
+    setCurrentUser(null);
+    setIsAuthModalOpen(true);
+  };
+
+  const handleSwitchAccount = () => {
+    setIsAuthModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-6 selection:bg-sky-200">
       {/* Top Desktop Helper Toolbar */}
@@ -357,6 +387,7 @@ export default function App() {
               unit={settings.unit}
               logs={activeRecord.logs}
               settings={settings}
+              user={currentUser}
               streak={streak}
               selectedDate={selectedDate}
               onSelectDate={setSelectedDate}
@@ -364,6 +395,7 @@ export default function App() {
               onRemoveLog={(id) => handleRemoveLog(id, selectedDate)}
               onUndoLast={() => handleUndoLast(selectedDate)}
               onNavigateToReminders={() => setCurrentTab('reminders')}
+              onNavigateToSettings={() => setCurrentTab('settings')}
             />
           )}
 
@@ -389,7 +421,11 @@ export default function App() {
           {currentTab === 'settings' && (
             <SettingsView
               settings={settings}
+              user={currentUser}
               onUpdateSettings={handleUpdateSettings}
+              onUpdateProfile={handleUpdateProfile}
+              onLogout={handleLogout}
+              onSwitchAccount={handleSwitchAccount}
               onResetToday={() => handleResetDay(todayStr)}
               onClearAllHistory={handleClearAllHistory}
             />
@@ -401,6 +437,12 @@ export default function App() {
           currentTab={currentTab}
           onSelectTab={setCurrentTab}
           remindersActive={settings.reminders.enabled}
+        />
+
+        {/* First-Time & Account Auth Modal with Nickname Onboarding */}
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onSuccess={handleAuthSuccess}
         />
       </main>
     </div>
