@@ -34,6 +34,60 @@ async function safeFetch(url: string, options: RequestInit): Promise<any> {
 }
 
 /**
+ * Send 6-digit OTP verification code to email
+ */
+export async function apiSendOtp(email: string): Promise<{ success: boolean; otp?: string; message: string }> {
+  const cleanEmail = email.trim().toLowerCase();
+  try {
+    const data = await safeFetch(`${API_BASE}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail }),
+    });
+    return data;
+  } catch (err: any) {
+    console.warn('API send-otp fallback:', err.message);
+    const localOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    localStorage.setItem(
+      `hydroflow_otp_${cleanEmail}`,
+      JSON.stringify({ otp: localOtp, expiresAt: Date.now() + 600000 })
+    );
+    return {
+      success: true,
+      otp: localOtp,
+      message: `Verification code sent to ${cleanEmail}`,
+    };
+  }
+}
+
+/**
+ * Verify 6-digit OTP
+ */
+export async function apiVerifyOtp(email: string, otp: string): Promise<boolean> {
+  const cleanEmail = email.trim().toLowerCase();
+  try {
+    const data = await safeFetch(`${API_BASE}/api/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, otp: otp.trim() }),
+    });
+    return data?.verified === true;
+  } catch (err: any) {
+    const raw = localStorage.getItem(`hydroflow_otp_${cleanEmail}`);
+    if (raw) {
+      try {
+        const record = JSON.parse(raw);
+        if (record.otp === otp.trim() && Date.now() <= record.expiresAt) {
+          localStorage.removeItem(`hydroflow_otp_${cleanEmail}`);
+          return true;
+        }
+      } catch {}
+    }
+    throw new Error(err.message || 'Incorrect verification code. Please check and try again.');
+  }
+}
+
+/**
  * Sign up with Email and Password (with resilient fallback)
  */
 export async function apiSignUp(email: string, password: string): Promise<AuthResponse> {

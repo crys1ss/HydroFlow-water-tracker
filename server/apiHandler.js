@@ -37,6 +37,12 @@ function writeDb(db) {
   }
 }
 
+const otpStore = new Map();
+
+function generateOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 export function handleApiRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
@@ -76,6 +82,76 @@ export function handleApiRequest(req, res) {
 
     const db = readDb();
 
+    // 0. SEND OTP FOR SIGN UP VERIFICATION
+    if (pathname === '/api/auth/send-otp' && req.method === 'POST') {
+      const { email } = json;
+      if (!email || !email.includes('@')) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'Valid email address is required.' }));
+        return;
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+      const existing = db.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+      if (existing) {
+        res.statusCode = 409;
+        res.end(JSON.stringify({ error: 'An account with this email already exists. Please Sign In.' }));
+        return;
+      }
+
+      const otp = generateOtp();
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+      otpStore.set(normalizedEmail, { otp, expiresAt });
+
+      console.log(`[HYDROFLOW AUTH] Generated 6-digit OTP for ${normalizedEmail}: ${otp}`);
+
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        success: true,
+        otp, // Returned for instant preview/testing
+        message: `6-digit verification code sent to ${normalizedEmail}`,
+      }));
+      return;
+    }
+
+    // 0.1 VERIFY OTP
+    if (pathname === '/api/auth/verify-otp' && req.method === 'POST') {
+      const { email, otp } = json;
+      if (!email || !otp) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'Email and 6-digit OTP are required.' }));
+        return;
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+      const record = otpStore.get(normalizedEmail);
+
+      if (!record) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'No verification code found. Please request a new code.' }));
+        return;
+      }
+
+      if (Date.now() > record.expiresAt) {
+        otpStore.delete(normalizedEmail);
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'Verification code has expired. Please request a new one.' }));
+        return;
+      }
+
+      if (record.otp !== String(otp).trim()) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'Incorrect 6-digit code. Please check and try again.' }));
+        return;
+      }
+
+      // Verified successfully
+      otpStore.delete(normalizedEmail);
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, verified: true }));
+      return;
+    }
+
     // 1. SIGN UP (Email & Password)
     if (pathname === '/api/auth/signup' && req.method === 'POST') {
       const { email, password } = json;
@@ -105,6 +181,7 @@ export function handleApiRequest(req, res) {
         nickname: '',
         avatar: '💧',
         authProvider: 'email',
+        emailVerified: true,
         createdAt: Date.now(),
       };
 

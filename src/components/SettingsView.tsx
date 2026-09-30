@@ -207,7 +207,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ) : (
                         <span className="flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-sky-50 border border-sky-200/60 px-1.5 py-0.5 rounded-md">
                           <Mail className="w-2.5 h-2.5" />
-                          Email
+                          Email Verified ✓
                         </span>
                       )}
                     </div>

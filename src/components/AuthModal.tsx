@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Droplet,
@@ -11,7 +11,9 @@ import {
   AlertCircle,
   ShieldCheck,
   Globe,
-  Check,
+  KeyRound,
+  RotateCcw,
+  CheckCircle2,
   X,
 } from 'lucide-react';
 import { UserProfile } from '../types';
@@ -20,7 +22,8 @@ import {
   apiSignIn,
   apiGoogleAuth,
   apiUpdateProfile,
-  getGoogleClientId,
+  apiSendOtp,
+  apiVerifyOtp,
 } from '../utils/api';
 import { saveCurrentUser } from '../utils/storage';
 import { playWaterDropSound, triggerHapticFeedback } from '../utils/audio';
@@ -29,6 +32,8 @@ interface AuthModalProps {
   isOpen: boolean;
   onSuccess: (user: UserProfile) => void;
 }
+
+type AuthStep = 'credentials' | 'otp' | 'nickname';
 
 const AVATAR_OPTIONS = [
   { emoji: '💧', label: 'Hydro Hero' },
@@ -54,23 +59,50 @@ const SUGGESTED_NICKNAMES = [
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
+  const [currentStep, setCurrentStep] = useState<AuthStep>('credentials');
+
+  // Credential Inputs
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+
+  // OTP Verification state
+  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [sentOtpPreview, setSentOtpPreview] = useState<string | null>(null);
+  const [resendCountdown, setResendCountdown] = useState<number>(60);
+  const [canResend, setCanResend] = useState(false);
+  const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Google Connect Modal state
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [googleEmail, setGoogleEmail] = useState('');
   const [googleFullName, setGoogleFullName] = useState('');
 
-  // Step 2: Nickname Onboarding state for new accounts
-  const [isOnboardingNickname, setIsOnboardingNickname] = useState(false);
+  // Nickname Onboarding state
   const [pendingUser, setPendingUser] = useState<UserProfile | null>(null);
   const [nickname, setNickname] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('💧');
+
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Resend Countdown Timer
+  useEffect(() => {
+    let timer: any;
+    if (currentStep === 'otp' && resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown((prev) => {
+          if (prev <= 1) {
+            setCanResend(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [currentStep, resendCountdown]);
 
   if (!isOpen) return null;
 
@@ -84,7 +116,71 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
   // Switch Auth Mode
   const handleToggleMode = (mode: 'signin' | 'signup') => {
     setAuthMode(mode);
+    setCurrentStep('credentials');
     setError(null);
+  };
+
+  // Handle Digit Change in 6-digit OTP
+  const handleOtpChange = (index: number, value: string) => {
+    // Only accept numeric digit
+    const cleaned = value.replace(/\D/g, '');
+    if (!cleaned && value !== '') return;
+
+    const nextDigits = [...otpDigits];
+    nextDigits[index] = cleaned.slice(-1);
+    setOtpDigits(nextDigits);
+    setError(null);
+
+    // Auto-focus next input
+    if (cleaned && index < 5) {
+      otpInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  // Handle Backspace and Arrow navigation
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
+      otpInputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  // Handle Paste 6-digit code
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (!pasted) return;
+
+    const nextDigits = [...otpDigits];
+    for (let i = 0; i < 6; i++) {
+      nextDigits[i] = pasted[i] || '';
+    }
+    setOtpDigits(nextDigits);
+    setError(null);
+
+    const targetIdx = Math.min(pasted.length, 5);
+    otpInputRefs.current[targetIdx]?.focus();
+  };
+
+  // Resend 6-digit OTP code
+  const handleResendOtp = async () => {
+    if (!canResend) return;
+    setIsLoading(true);
+    setError(null);
+    triggerHapticFeedback([10]);
+
+    try {
+      const res = await apiSendOtp(email.trim());
+      setIsLoading(false);
+      setResendCountdown(60);
+      setCanResend(false);
+      if (res.otp) {
+        setSentOtpPreview(res.otp);
+      }
+      playWaterDropSound();
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err.message || 'Failed to resend verification code.');
+    }
   };
 
   // Open Google Connection Dialog
@@ -94,7 +190,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
     setShowGoogleModal(true);
   };
 
-  // Submit Google Connection with Real Google Account
+  // Submit Google Connection
   const handleConnectGoogle = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -118,12 +214,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
       setShowGoogleModal(false);
 
       if (authRes.isNew || !authRes.user.nickname) {
-        // First-time Google user -> move to Nickname Onboarding
         setPendingUser(authRes.user);
         setNickname(googleFullName.trim() || getEmailPrefix(cleanGoogleEmail));
-        setIsOnboardingNickname(true);
+        setCurrentStep('nickname');
       } else {
-        // Existing user -> login directly
         playWaterDropSound();
         saveCurrentUser(authRes.user);
         onSuccess(authRes.user);
@@ -134,8 +228,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
     }
   };
 
-  // Handle Email Submit (Sign In or Sign Up)
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Handle Email Credentials Submit (Sign In or Trigger OTP on Sign Up)
+  const handleSubmitCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -150,35 +244,83 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
       return;
     }
 
-    if (authMode === 'signup' && password !== confirmPassword) {
-      setError('Passwords do not match. Please verify.');
-      return;
-    }
+    if (authMode === 'signup') {
+      if (password !== confirmPassword) {
+        setError('Passwords do not match. Please verify.');
+        return;
+      }
 
-    setIsLoading(true);
-    triggerHapticFeedback([10]);
+      setIsLoading(true);
+      triggerHapticFeedback([10]);
 
-    try {
-      if (authMode === 'signup') {
-        const response = await apiSignUp(cleanEmail, password);
+      try {
+        // Send 6-digit OTP code to email
+        const otpRes = await apiSendOtp(cleanEmail);
         setIsLoading(false);
 
-        // Move to Nickname Onboarding
-        setPendingUser(response.user);
-        setNickname(getEmailPrefix(cleanEmail));
-        setIsOnboardingNickname(true);
-      } else {
-        // Sign In
+        if (otpRes.otp) {
+          setSentOtpPreview(otpRes.otp);
+        }
+
+        setResendCountdown(60);
+        setCanResend(false);
+        setOtpDigits(['', '', '', '', '', '']);
+        setCurrentStep('otp');
+        playWaterDropSound();
+      } catch (err: any) {
+        setIsLoading(false);
+        setError(err.message || 'Could not send verification code.');
+      }
+    } else {
+      // Sign In mode
+      setIsLoading(true);
+      triggerHapticFeedback([10]);
+
+      try {
         const response = await apiSignIn(cleanEmail, password);
         setIsLoading(false);
 
         playWaterDropSound();
         saveCurrentUser(response.user);
         onSuccess(response.user);
+      } catch (err: any) {
+        setIsLoading(false);
+        setError(err.message || 'Incorrect email or password.');
       }
+    }
+  };
+
+  // Handle Submit 6-digit OTP Verification
+  const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const fullOtp = otpDigits.join('');
+    if (fullOtp.length < 6) {
+      setError('Please enter all 6 digits of your verification code.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    triggerHapticFeedback([15]);
+
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      // 1. Verify OTP
+      await apiVerifyOtp(cleanEmail, fullOtp);
+
+      // 2. Create Verified Account
+      const response = await apiSignUp(cleanEmail, password);
+      setIsLoading(false);
+
+      playWaterDropSound();
+      triggerHapticFeedback([20, 40, 20]);
+
+      setPendingUser(response.user);
+      setNickname(getEmailPrefix(cleanEmail));
+      setCurrentStep('nickname');
     } catch (err: any) {
       setIsLoading(false);
-      setError(err.message || 'An error occurred during authentication.');
+      setError(err.message || 'Incorrect verification code. Please check and try again.');
     }
   };
 
@@ -203,8 +345,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
       playWaterDropSound();
       triggerHapticFeedback([20, 50, 20]);
 
-      saveCurrentUser(updateRes.user);
-      onSuccess(updateRes.user);
+      const finalUser: UserProfile = {
+        ...updateRes.user,
+        emailVerified: true,
+      };
+
+      saveCurrentUser(finalUser);
+      onSuccess(finalUser);
     } catch (err: any) {
       setIsLoading(false);
       setError(err.message || 'Failed to save nickname. Please try again.');
@@ -229,27 +376,146 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
           <div className="absolute -left-6 -top-6 w-24 h-24 bg-white/10 rounded-full blur-lg pointer-events-none" />
 
           <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl mx-auto flex items-center justify-center shadow-inner mb-3 border border-white/30">
-            <Droplet className="w-8 h-8 text-white fill-white animate-pulse" />
+            {currentStep === 'otp' ? (
+              <KeyRound className="w-7 h-7 text-white stroke-[2.2] animate-bounce" />
+            ) : currentStep === 'nickname' ? (
+              <User className="w-7 h-7 text-white stroke-[2.2]" />
+            ) : (
+              <Droplet className="w-8 h-8 text-white fill-white animate-pulse" />
+            )}
           </div>
 
           <h2 className="text-xl font-extrabold tracking-tight text-white drop-shadow-xs">
-            {isOnboardingNickname
+            {currentStep === 'otp'
+              ? 'Verify Your Email'
+              : currentStep === 'nickname'
               ? 'Choose Your Nickname'
               : authMode === 'signup'
               ? 'Join HydroFlow'
               : 'Welcome Back'}
           </h2>
           <p className="text-xs text-sky-100 mt-1 max-w-xs mx-auto">
-            {isOnboardingNickname
+            {currentStep === 'otp'
+              ? `Enter the 6-digit code sent to ${email}`
+              : currentStep === 'nickname'
               ? 'Tell us what to call you so we can personalize your hydration journey.'
               : authMode === 'signup'
-              ? 'Create your account to sync your water logs seamlessly across desktop & mobile.'
+              ? 'Create your account with email verification to sync across all devices.'
               : 'Sign in to sync your progress across all your devices.'}
           </p>
         </div>
 
-        {/* STEP 2: NICKNAME ONBOARDING SCREEN */}
-        {isOnboardingNickname ? (
+        {/* STEP 2: 6-DIGIT OTP VERIFICATION SCREEN */}
+        {currentStep === 'otp' && (
+          <form onSubmit={handleVerifyOtpSubmit} className="p-6 space-y-4">
+            {/* Live OTP Demo / Preview helper badge */}
+            {sentOtpPreview && (
+              <div
+                onClick={() => {
+                  const chars = sentOtpPreview.split('');
+                  setOtpDigits(chars);
+                  triggerHapticFeedback([10]);
+                }}
+                className="flex items-center justify-between p-3 rounded-2xl bg-sky-50 border border-sky-200 text-sky-800 text-xs cursor-pointer hover:bg-sky-100/70 transition"
+                title="Click to autofill"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span>
+                    Verification Code: <strong className="font-mono tracking-wider text-sm">{sentOtpPreview}</strong>
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-sky-600 text-white px-2 py-0.5 rounded-md">
+                  Autofill
+                </span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 text-center">
+                Enter 6-Digit Code
+              </label>
+
+              {/* 6 Digit Input Boxes */}
+              <div className="flex justify-center gap-2" onPaste={handleOtpPaste}>
+                {otpDigits.map((digit, idx) => (
+                  <input
+                    key={idx}
+                    ref={(el) => (otpInputRefs.current[idx] = el)}
+                    id={`otp-input-${idx}`}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(idx, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                    className={`w-11 h-13 text-center text-xl font-extrabold font-mono rounded-2xl border transition ${
+                      digit
+                        ? 'bg-sky-50 border-sky-500 text-sky-900 ring-2 ring-sky-500/20 shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20'
+                    }`}
+                    autoFocus={idx === 0}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Submit Verification */}
+            <button
+              id="btn-verify-otp-submit"
+              type="submit"
+              disabled={isLoading || otpDigits.join('').length < 6}
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-sky-600/20 transition cursor-pointer disabled:opacity-50"
+            >
+              {isLoading ? (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <span>Verify Email & Continue</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </>
+              )}
+            </button>
+
+            {/* Resend & Back Actions */}
+            <div className="flex items-center justify-between pt-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setCurrentStep('credentials')}
+                className="text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
+              >
+                Change Email
+              </button>
+
+              <button
+                type="button"
+                id="btn-resend-otp"
+                disabled={!canResend || isLoading}
+                onClick={handleResendOtp}
+                className={`flex items-center gap-1 font-bold ${
+                  canResend
+                    ? 'text-sky-600 hover:text-sky-700 cursor-pointer'
+                    : 'text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>{canResend ? 'Resend Code' : `Resend in ${resendCountdown}s`}</span>
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 3: NICKNAME ONBOARDING SCREEN */}
+        {currentStep === 'nickname' && (
           <form onSubmit={handleFinishOnboarding} className="p-6 space-y-5">
             <div className="space-y-4">
               {/* Avatar Selector */}
@@ -352,8 +618,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
               )}
             </button>
           </form>
-        ) : (
-          /* STEP 1: AUTHENTICATION SCREEN */
+        )}
+
+        {/* STEP 1: CREDENTIALS (SIGN IN / SIGN UP) SCREEN */}
+        {currentStep === 'credentials' && (
           <div className="p-6 space-y-4">
             {/* Sign In / Sign Up Tabs */}
             <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200/60">
@@ -383,7 +651,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
               </button>
             </div>
 
-            {/* Real Google Sign-In Button */}
+            {/* Google Sign-In Button */}
             <button
               id="btn-auth-google"
               type="button"
@@ -422,7 +690,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
             </div>
 
             {/* Email & Password Form */}
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmitCredentials} className="space-y-3.5">
               {/* Email */}
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
@@ -514,7 +782,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
                   <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : authMode === 'signup' ? (
                   <>
-                    <span>Create Free Account</span>
+                    <span>Send 6-Digit Code</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </>
                 ) : (
@@ -529,12 +797,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
             <div className="pt-2 text-center flex items-center justify-center gap-3 text-[11px] text-slate-400">
               <span className="flex items-center gap-1">
                 <Globe className="w-3.5 h-3.5 text-sky-500" />
-                <span>Syncs Across Desktop & Mobile</span>
+                <span>Multi-Device Sync</span>
               </span>
               <span>•</span>
               <span className="flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Encrypted & Private</span>
+                <span>OTP Verified Email</span>
               </span>
             </div>
           </div>
@@ -588,7 +856,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
               </div>
 
               <p className="text-xs text-slate-500 leading-relaxed">
-                Connect your real Google account to sync your hydration streak across all your devices.
+                Connect your Google account to sync your hydration streak across all your devices.
               </p>
 
               <form onSubmit={handleConnectGoogle} className="space-y-3 pt-1">

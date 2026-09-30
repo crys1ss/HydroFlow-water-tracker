@@ -43,6 +43,7 @@ export interface UserProfile {
   nickname: string;
   avatar: string;
   authProvider: 'google' | 'email';
+  emailVerified?: boolean;
   createdAt: number;
 }
 
@@ -53,6 +54,7 @@ export interface StoredAccount {
   nickname: string;
   avatar: string;
   authProvider: 'google' | 'email';
+  emailVerified?: boolean;
   createdAt: number;
   settings?: UserSettings;
   history?: Record<string, DayRecord>;
