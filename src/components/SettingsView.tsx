@@ -8,12 +8,14 @@ interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (updated: Partial<UserSettings>) => void;
   onResetToday: () => void;
+  onClearAllHistory?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings,
   onUpdateSettings,
   onResetToday,
+  onClearAllHistory,
 }) => {
   const [weightKg, setWeightKg] = useState<number>(settings.weightKg || 70);
   const [activity, setActivity] = useState<'sedentary' | 'moderate' | 'active'>(
@@ -21,6 +23,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   );
   const [showCalculator, setShowCalculator] = useState(false);
   const [resetConfirmed, setResetConfirmed] = useState(false);
+  const [wipeConfirmed, setWipeConfirmed] = useState(false);
 
   // Smart hydration formula: 35ml per kg of bodyweight + activity adjustment
   const calculateRecommendedGoal = (kg: number, act: 'sedentary' | 'moderate' | 'active') => {
@@ -59,6 +62,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       onResetToday();
       setResetConfirmed(true);
       setTimeout(() => setResetConfirmed(false), 2500);
+    }
+  };
+
+  const handleConfirmWipe = () => {
+    if (window.confirm("Are you sure you want to clear ALL history and start completely fresh? This cannot be undone.")) {
+      if (onClearAllHistory) {
+        onClearAllHistory();
+      }
+      setWipeConfirmed(true);
+      setTimeout(() => setWipeConfirmed(false), 2500);
     }
   };
 
@@ -286,33 +299,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </p>
       </div>
 
-      {/* Reset Section */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-xs flex items-center justify-between">
-        <div>
-          <span className="text-xs font-bold text-slate-800">Reset Today's Intake</span>
-          <p className="text-[11px] text-slate-400">Clear today's drinks back to 0</p>
+      {/* Reset & Wipe Section */}
+      <div className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-xs space-y-3">
+        <h2 className="text-sm font-bold text-slate-900">Data Management</h2>
+
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div>
+            <span className="text-xs font-bold text-slate-800">Reset Today's Intake</span>
+            <p className="text-[11px] text-slate-400">Clear today's drinks back to 0</p>
+          </div>
+          <button
+            id="btn-reset-today-logs"
+            onClick={handleConfirmReset}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition cursor-pointer ${
+              resetConfirmed
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                : 'text-rose-600 border-rose-200 bg-rose-50/50 hover:bg-rose-100/70'
+            }`}
+          >
+            {resetConfirmed ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                <span>Reset Done</span>
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reset Today</span>
+              </>
+            )}
+          </button>
         </div>
-        <button
-          id="btn-reset-today-logs"
-          onClick={handleConfirmReset}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition ${
-            resetConfirmed
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-              : 'text-rose-600 border-rose-200 bg-rose-50/50 hover:bg-rose-100/70'
-          }`}
-        >
-          {resetConfirmed ? (
-            <>
-              <Check className="w-3.5 h-3.5" />
-              <span>Reset Done</span>
-            </>
-          ) : (
-            <>
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </>
-          )}
-        </button>
+
+        {onClearAllHistory && (
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              <span className="text-xs font-bold text-rose-700">Wipe All History</span>
+              <p className="text-[11px] text-slate-400">Clear all past logs and start with a 100% fresh slate</p>
+            </div>
+            <button
+              id="btn-wipe-all-history"
+              onClick={handleConfirmWipe}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition cursor-pointer ${
+                wipeConfirmed
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                  : 'text-rose-700 border-rose-300 bg-rose-50 hover:bg-rose-100'
+              }`}
+            >
+              {wipeConfirmed ? (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>All Cleared</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Clear All Data</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

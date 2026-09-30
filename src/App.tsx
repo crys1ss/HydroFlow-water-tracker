@@ -225,6 +225,23 @@ export default function App() {
     });
   };
 
+  // Wipe all history completely and start 100% fresh
+  const handleClearAllHistory = () => {
+    if (settings.hapticEnabled) {
+      triggerHapticFeedback([20, 50, 20]);
+    }
+    const cleanHistory = {
+      [todayStr]: {
+        date: todayStr,
+        total: 0,
+        goal: settings.dailyGoal,
+        logs: [],
+      },
+    };
+    setHistory(cleanHistory);
+    saveHistory(cleanHistory);
+  };
+
   // Update settings helper
   const handleUpdateSettings = (updated: Partial<UserSettings>) => {
     setSettings((prev) => {
@@ -374,6 +391,7 @@ export default function App() {
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
               onResetToday={() => handleResetDay(todayStr)}
+              onClearAllHistory={handleClearAllHistory}
             />
           )}
         </div>
