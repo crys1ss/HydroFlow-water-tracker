@@ -36,7 +36,7 @@ async function safeFetch(url: string, options: RequestInit): Promise<any> {
 /**
  * Send 6-digit OTP verification code to email
  */
-export async function apiSendOtp(email: string): Promise<{ success: boolean; otp?: string; message: string }> {
+export async function apiSendOtp(email: string): Promise<{ success: boolean; message: string }> {
   const cleanEmail = email.trim().toLowerCase();
   try {
     const data = await safeFetch(`${API_BASE}/api/auth/send-otp`, {
@@ -46,17 +46,8 @@ export async function apiSendOtp(email: string): Promise<{ success: boolean; otp
     });
     return data;
   } catch (err: any) {
-    console.warn('API send-otp fallback:', err.message);
-    const localOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    localStorage.setItem(
-      `hydroflow_otp_${cleanEmail}`,
-      JSON.stringify({ otp: localOtp, expiresAt: Date.now() + 600000 })
-    );
-    return {
-      success: true,
-      otp: localOtp,
-      message: `Verification code sent to ${cleanEmail}`,
-    };
+    console.warn('API send-otp error:', err.message);
+    throw err;
   }
 }
 

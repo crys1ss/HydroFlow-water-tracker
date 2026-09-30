@@ -169,13 +169,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
     triggerHapticFeedback([10]);
 
     try {
-      const res = await apiSendOtp(email.trim());
+      await apiSendOtp(email.trim());
       setIsLoading(false);
       setResendCountdown(60);
       setCanResend(false);
-      if (res.otp) {
-        setSentOtpPreview(res.otp);
-      }
       playWaterDropSound();
     } catch (err: any) {
       setIsLoading(false);
@@ -255,12 +252,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
 
       try {
         // Send 6-digit OTP code to email
-        const otpRes = await apiSendOtp(cleanEmail);
+        await apiSendOtp(cleanEmail);
         setIsLoading(false);
-
-        if (otpRes.otp) {
-          setSentOtpPreview(otpRes.otp);
-        }
 
         setResendCountdown(60);
         setCanResend(false);
@@ -408,32 +401,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
         {/* STEP 2: 6-DIGIT OTP VERIFICATION SCREEN */}
         {currentStep === 'otp' && (
           <form onSubmit={handleVerifyOtpSubmit} className="p-6 space-y-4">
-            {/* Live OTP Demo / Preview helper badge */}
-            {sentOtpPreview && (
-              <div
-                onClick={() => {
-                  const chars = sentOtpPreview.split('');
-                  setOtpDigits(chars);
-                  triggerHapticFeedback([10]);
-                }}
-                className="flex items-center justify-between p-3 rounded-2xl bg-sky-50 border border-sky-200 text-sky-800 text-xs cursor-pointer hover:bg-sky-100/70 transition"
-                title="Click to autofill"
-              >
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-sky-600 shrink-0" />
-                  <span>
-                    Verification Code: <strong className="font-mono tracking-wider text-sm">{sentOtpPreview}</strong>
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider bg-sky-600 text-white px-2 py-0.5 rounded-md">
-                  Autofill
-                </span>
+            {/* Email Dispatch Notice */}
+            <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-200 text-sky-900 text-xs flex items-start gap-2.5 shadow-2xs">
+              <Mail className="w-4 h-4 text-sky-600 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-bold text-sky-950">Verification code sent to your email</p>
+                <p className="text-[11px] text-sky-800 leading-relaxed">
+                  Please open your inbox (or Spam folder) for <strong>{email}</strong> to retrieve your 6-digit code.
+                </p>
               </div>
-            )}
+            </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 text-center">
-                Enter 6-Digit Code
+                Enter 6-Digit Code from Email
               </label>
 
               {/* 6 Digit Input Boxes */}
