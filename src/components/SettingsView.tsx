@@ -214,8 +214,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="text-xs text-slate-500 font-medium">
                       {user.email}
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
-                      Member since {memberSince}
+                    <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-0.5">
+                      <span>Member since {memberSince}</span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Cloud Synced</span>
+                      </span>
                     </div>
                   </div>
                 </div>

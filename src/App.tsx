@@ -12,6 +12,7 @@ import {
   updateUserNickname,
   logoutUser,
 } from './utils/storage';
+import { apiFetchData, apiSyncData, apiUpdateProfile } from './utils/api';
 import { playWaterDropSound, triggerHapticFeedback } from './utils/audio';
 import {
   sendWaterReminder,
@@ -51,15 +52,41 @@ export default function App() {
 
   const streak = calculateStreak(history);
 
-  // Sync settings to storage
+  // Sync settings to local storage
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
 
-  // Sync history to storage
+  // Sync history to local storage
   useEffect(() => {
     saveHistory(history);
   }, [history]);
+
+  // Load cloud data for cross-device sync when user is authenticated
+  useEffect(() => {
+    if (currentUser?.id) {
+      apiFetchData(currentUser.id).then((cloud) => {
+        if (cloud) {
+          if (cloud.settings) {
+            setSettings((prev) => ({ ...prev, ...cloud.settings }));
+          }
+          if (cloud.history && Object.keys(cloud.history).length > 0) {
+            setHistory((prev) => ({ ...prev, ...cloud.history }));
+          }
+        }
+      });
+    }
+  }, [currentUser?.id]);
+
+  // Debounced cloud sync when settings or history change
+  useEffect(() => {
+    if (currentUser?.id) {
+      const timer = setTimeout(() => {
+        apiSyncData(currentUser.id, settings, history);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [currentUser?.id, settings, history]);
 
   // Midnight day rollover check & auto date refresh
   useEffect(() => {
@@ -282,11 +309,16 @@ export default function App() {
     setIsAuthModalOpen(false);
   };
 
-  const handleUpdateProfile = (nickname: string, avatar?: string) => {
+  const handleUpdateProfile = async (nickname: string, avatar?: string) => {
     if (!currentUser) return;
     const updated = updateUserNickname(currentUser.id, nickname, avatar);
     if (updated) {
       setCurrentUser(updated);
+    }
+    try {
+      await apiUpdateProfile(currentUser.id, nickname, avatar);
+    } catch (e) {
+      console.warn('Could not sync profile update to server:', e);
     }
   };
 
