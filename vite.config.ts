@@ -9,7 +9,16 @@ function apiPlugin(): Plugin {
     name: 'hydroflow-api-server',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url && req.url.startsWith('/api/')) {
+        if (req.url && (req.url.startsWith('/api/') || req.url.startsWith('/api?'))) {
+          handleApiRequest(req, res);
+        } else {
+          next();
+        }
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url && (req.url.startsWith('/api/') || req.url.startsWith('/api?'))) {
           handleApiRequest(req, res);
         } else {
           next();

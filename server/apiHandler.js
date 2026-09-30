@@ -133,7 +133,8 @@ async function sendOtpEmail(toEmail, otp) {
 
 export function handleApiRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const pathname = url.pathname;
+  const rawPath = url.pathname || '';
+  const pathname = rawPath.toLowerCase().replace(/\/+$/, '') || '/';
 
   // Set CORS headers for seamless cross-device mobile/desktop access
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -146,28 +147,12 @@ export function handleApiRequest(req, res) {
     return true;
   }
 
-  if (!pathname.startsWith('/api/')) {
+  if (!pathname.startsWith('/api')) {
     return false;
   }
 
-  // Parse JSON body for POST/PUT requests
-  let body = '';
-  req.on('data', (chunk) => {
-    body += chunk;
-  });
-
-  req.on('end', async () => {
-    let json = {};
-    if (body) {
-      try {
-        json = JSON.parse(body);
-      } catch {
-        json = {};
-      }
-    }
-
+  const processRequest = async (json) => {
     res.setHeader('Content-Type', 'application/json');
-
     const db = readDb();
 
     // 0. SEND OTP FOR SIGN UP VERIFICATION
@@ -416,6 +401,28 @@ export function handleApiRequest(req, res) {
     // 404 for unknown endpoints
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'API endpoint not found.' }));
+  };
+
+  if (req.body && typeof req.body === 'object') {
+    processRequest(req.body);
+    return true;
+  }
+
+  let body = '';
+  req.on('data', (chunk) => {
+    body += chunk;
+  });
+
+  req.on('end', async () => {
+    let json = {};
+    if (body) {
+      try {
+        json = JSON.parse(body);
+      } catch {
+        json = {};
+      }
+    }
+    await processRequest(json);
   });
 
   return true;
